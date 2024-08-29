@@ -1,0 +1,23 @@
+.pagination-container {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.pagination-button {
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+}
+
+.lightning-card {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.slds-m-around_medium {
+    margin: 1rem;
+}
+
+.slds-text-color_error {
+    color: #e74c3c;
+    font-weight: bold;
+}

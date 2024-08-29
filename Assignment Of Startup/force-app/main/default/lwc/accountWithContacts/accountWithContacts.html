@@ -1,0 +1,61 @@
+<!--
+<template>
+    <lightning-card title="Accounts and Contacts">
+        <template if:true={error}>
+            <div class="slds-text-color_error">{error}</div>
+        </template>
+
+        <template if:true={accounts}>
+            <lightning-datatable
+                key-field="Id"
+                data={accounts}
+                columns={columns}
+                hide-checkbox-column="true">
+            </lightning-datatable>
+
+            <div class="slds-m-top_medium">
+                <lightning-button label="Previous" onclick={handlePrevious} disabled={disablePrevious}></lightning-button>
+                <lightning-button label="Next" onclick={handleNext} disabled={disableNext}></lightning-button>
+            </div>
+        </template>
+    </lightning-card>
+</template>
+-->
+<template>
+    <lightning-card title="Accounts and Contacts">
+        <div class="slds-m-around_medium">
+            <lightning-datatable
+                key-field="Id"
+                data={accounts}
+                columns={columns}
+                hide-checkbox-column
+                onrowaction={handleRowAction}
+            >
+            </lightning-datatable>
+
+            <div class="pagination-container">
+                <lightning-button
+                    class="pagination-button"
+                    label="Previous"
+                    onclick={handlePrevious}
+                    disabled={disablePrevious}
+                >
+                </lightning-button>
+
+                <lightning-button
+                    class="pagination-button"
+                    label="Next"
+                    onclick={handleNext}
+                    disabled={disableNext}
+                >
+                </lightning-button>
+            </div>
+
+            <template if:true={error}>
+                <div class="slds-text-color_error slds-m-top_medium">
+                    {error}
+                </div>
+            </template>
+        </div>
+    </lightning-card>
+</template>
