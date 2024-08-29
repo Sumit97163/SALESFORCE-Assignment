@@ -1,0 +1,353 @@
+<!---- Task-1 Trigger-------->
+Trigger
+   -Sum of all opportunities on account - 
+    Create a field on account named - TotalAmount where you will add all the sum. 
+
+trigger OpportunityTriggers on Opportunity (after insert, after update, after delete) {
+    // Set to collect Account Ids
+    Set<Id> accountIds = new Set<Id>();
+
+    // Add Account Ids from Opportunities to the set
+    if (Trigger.isInsert || Trigger.isUpdate) {
+        for (Opportunity opp : Trigger.new) {
+            if (opp.AccountId != null) {
+                accountIds.add(opp.AccountId);
+            }
+        }
+    }
+    if (Trigger.isDelete) {
+        for (Opportunity opp : Trigger.old) {
+            if (opp.AccountId != null) {
+                accountIds.add(opp.AccountId);
+            }
+        }
+    }
+
+    // Call the helper class method to update Account TotalAmount
+    AccountHelper.updateAccountTotalAmount(accountIds);
+}
+
+<------ AccountHelper Class for above trigger---> 
+
+public class AccountHelper {
+    public static void updateAccountTotalAmount(Set<Id> accountIds) {
+        if (accountIds.isEmpty()) {
+            return;
+        }
+
+        // Query to aggregate Opportunity amounts by AccountId
+        Map<Id, Decimal> accountToTotalAmount = new Map<Id, Decimal>();
+        for (AggregateResult ar : [
+            SELECT AccountId, SUM(Amount) totalAmount
+            FROM Opportunity
+            WHERE AccountId IN :accountIds
+            GROUP BY AccountId
+        ]) {
+            accountToTotalAmount.put((Id)ar.get('AccountId'), (Decimal)ar.get('totalAmount'));
+        }
+
+        // Prepare a list of Accounts to update
+        List<Account> accountsToUpdate = new List<Account>();
+        for (Id accountId : accountIds) {
+            Account acc = new Account(Id = accountId);
+            acc.TotalAmount__c = accountToTotalAmount.get(accountId) != null ? accountToTotalAmount.get(accountId) : 0;
+            accountsToUpdate.add(acc);
+        }
+
+        // Update Accounts
+        if (!accountsToUpdate.isEmpty()) {
+            update accountsToUpdate;
+        }
+    }
+}
+
+<Test Class for above trigger---->
+
+@isTest
+private class AccountHelperTest {
+    @isTest
+    static void testAccountTotalAmountUpdate() {
+        // Create Account
+        Account acc = new Account(Name = 'Test Account');
+        insert acc;
+
+        // Create Opportunities
+        Opportunity opp1 = new Opportunity(Name = 'Test Opportunity 1', Amount = 1000, CloseDate = Date.today().addDays(30), StageName = 'Prospecting', AccountId = acc.Id);
+        Opportunity opp2 = new Opportunity(Name = 'Test Opportunity 2', Amount = 2000, CloseDate = Date.today().addDays(30), StageName = 'Prospecting', AccountId = acc.Id);
+        insert new List<Opportunity>{opp1, opp2};
+
+        // Verify Account TotalAmount
+        acc = [SELECT TotalAmount__c FROM Account WHERE Id = :acc.Id];
+        System.assertEquals(3000, acc.TotalAmount__c);
+
+        // Update Opportunity
+        opp1.Amount = 1500;
+        update opp1;
+
+        // Verify Account TotalAmount after update
+        acc = [SELECT TotalAmount__c FROM Account WHERE Id = :acc.Id];
+        System.assertEquals(3500, acc.TotalAmount__c);
+
+        // Delete Opportunity
+        delete opp2;
+
+        // Verify Account TotalAmount after delete
+        acc = [SELECT TotalAmount__c FROM Account WHERE Id = :acc.Id];
+        System.assertEquals(1500, acc.TotalAmount__c);
+    }
+}
+
+
+<!-----Task - 3--------------->
+LWC Component to display All accounts and their contact
+
+
+accountwithContacts.html
+
+<template>
+    <lightning-card title="Accounts and Contacts">
+        <div class="slds-m-around_medium">
+            <lightning-datatable
+                key-field="Id"
+                data={accounts}
+                columns={columns}
+                hide-checkbox-column
+                onrowaction={handleRowAction}
+            >
+            </lightning-datatable>
+
+            <div class="pagination-container">
+                <lightning-button
+                    class="pagination-button"
+                    label="Previous"
+                    onclick={handlePrevious}
+                    disabled={disablePrevious}
+                >
+                </lightning-button>
+
+                <lightning-button
+                    class="pagination-button"
+                    label="Next"
+                    onclick={handleNext}
+                    disabled={disableNext}
+                >
+                </lightning-button>
+            </div>
+
+            <template if:true={error}>
+                <div class="slds-text-color_error slds-m-top_medium">
+                    {error}
+                </div>
+            </template>
+        </div>
+    </lightning-card>
+</template>
+
+accountwithContacts.js
+
+import { LightningElement, track, wire } from 'lwc';
+import getAccountsWithContacts from '@salesforce/apex/AccountWithContactsController.getAccountsWithContacts';
+import getAccountsCount from '@salesforce/apex/AccountWithContactsController.getAccountsCount';
+
+export default class AccountWithContacts extends LightningElement {
+    @track accounts = [];
+    @track currentPage = 1;
+    @track totalRecords;
+    @track pageSize = 10; // Set the number of records per page
+    @track totalPages;
+    @track error;
+
+    @track columns = [
+        { label: 'Account Name', fieldName: 'Name' },
+        { label: 'Contact Names', fieldName: 'ContactNames' }
+    ];
+
+    connectedCallback() {
+        this.loadAccounts();
+    }
+
+    loadAccounts() {
+        const offset = (this.currentPage - 1) * this.pageSize;
+
+        // Fetch total number of accounts to calculate total pages
+        getAccountsCount()
+            .then(count => {
+                this.totalRecords = count;
+                this.totalPages = Math.ceil(this.totalRecords / this.pageSize);
+            })
+            .catch(error => {
+                this.handleErrors(error, 'Error fetching account count');
+            });
+
+        // Fetch accounts with contacts based on the current page and page size
+        getAccountsWithContacts({ recordOffset: offset, recordLimit: this.pageSize })
+            .then(data => {
+                this.accounts = data.map(acc => {
+                    let contactNames = acc.Contacts ? acc.Contacts.map(con => `${con.FirstName} ${con.LastName}`).join(', ') : 'No Contacts';
+                    return { ...acc, ContactNames: contactNames };
+                });
+                this.error = undefined;
+            })
+            .catch(error => {
+                this.handleErrors(error, 'Error fetching accounts');
+            });
+    }
+
+    handlePrevious() {
+        if (this.currentPage > 1) {
+            this.currentPage -= 1;
+            this.loadAccounts();
+        }
+    }
+
+    handleNext() {
+        if (this.currentPage < this.totalPages) {
+            this.currentPage += 1;
+            this.loadAccounts();
+        }
+    }
+
+    get disablePrevious() {
+        return this.currentPage <= 1;
+    }
+
+    get disableNext() {
+        return this.currentPage >= this.totalPages;
+    }
+
+    // Utility method for error handling
+    handleErrors(error, customMessage) {
+        if (error && error.body && error.body.message) {
+            this.error = customMessage + ': ' + error.body.message;
+        } else {
+            this.error = customMessage + ': ' + (error ? error.message : 'Unknown error');
+        }
+        this.accounts = [];
+    }
+}
+
+<---accountwithContacts.js.meta.xml------------>
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata"
+    fqn="accountWithContacts">
+    <apiVersion>57.0</apiVersion>
+    <isExposed>true</isExposed>
+    <targets>
+        <target>lightning__AppPage</target>
+        <target>lightning__RecordPage</target>
+        <target>lightning__HomePage</target>
+    </targets>
+</LightningComponentBundle>
+
+
+
+
+<---accountwithContacts.css------------>
+.pagination-container {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+.pagination-button {
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+}
+
+.lightning-card {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.slds-m-around_medium {
+    margin: 1rem;
+}
+
+.slds-text-color_error {
+    color: #e74c3c;
+    font-weight: bold;
+}
+
+<---accountwithContacts.cls------------>
+public with sharing class AccountWithContactsController {
+    
+    @AuraEnabled(cacheable=true)
+    public static List<Account> getAccountsWithContacts(Integer recordOffset, Integer recordLimit) {
+        return [
+            SELECT Id, Name, 
+                   (SELECT Id, FirstName, LastName FROM Contacts)
+            FROM Account
+            ORDER BY Name
+            LIMIT :recordLimit
+            OFFSET :recordOffset
+        ];
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Integer getAccountsCount() {
+        return [SELECT COUNT() FROM Account];
+    }
+}
+
+<?xml version="1.0" encoding="UTF-8"?>
+<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>61.0</apiVersion>
+    <status>Active</status>
+</ApexClass>
+
+
+<!------Task-2------>
+Batch Class
+    -Add Primary contact on opportunity related to account
+
+
+
+<---AssignPrimaryContactToOpportunitiesBatch---->
+
+
+public class AssignPrimaryContactToOpportunitiesBatch implements Database.Batchable<SObject>, Database.Stateful {
+
+    public Database.QueryLocator start(Database.BatchableContext BC) {
+        String query = 'SELECT Id, AccountId FROM Opportunity ' +
+                       'WHERE Account.Primary_Contact__c != null AND Primary_Contact__c = null';
+        return Database.getQueryLocator(query);
+    }
+
+    public void execute(Database.BatchableContext BC, List<Opportunity> scope) {
+        List<Opportunity> opportunitiesToUpdate = new List<Opportunity>();
+        
+        for (Opportunity opp : scope) {
+            // Fetch the related Account's Primary Contact
+            Account acc = [SELECT Primary_Contact__c FROM Account WHERE Id = :opp.AccountId LIMIT 1];
+            opp.Primary_Contact__c = acc.Primary_Contact__c;
+            opportunitiesToUpdate.add(opp);
+        }
+        
+        if (!opportunitiesToUpdate.isEmpty()) {
+            update opportunitiesToUpdate;
+        }
+    }
+
+    public void finish(Database.BatchableContext BC) {
+        System.debug('Batch Process Completed!');
+    }
+}
+
+
+<--------PrimaryContactOpptySched---------------->
+
+public class PrimaryContactOpptySched implements Schedulable {
+    public void execute(SchedulableContext SC) {
+        AssignPrimaryContactToOpportunitiesBatch batch = new AssignPrimaryContactToOpportunitiesBatch();
+        Database.executeBatch(batch, 200);  // Batch size of 200
+    }
+}
+
+// To schedule the batch job, use the following in the Developer Console
+//PrimaryContactOpptySched sched = new PrimaryContactOpptySched();
+//String cronExp = '0 0 0 * * ?'; // Daily at midnight
+//System.schedule('DailyPrimaryContactBatch', cronExp, sched);
+
+
+
+
+
